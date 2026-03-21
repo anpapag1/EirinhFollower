@@ -37,10 +37,6 @@ bool debugMode = false;
 #define EEPROM_ADDR_KP 0
 #define EEPROM_ADDR_KI 4
 #define EEPROM_ADDR_KD 8
-#define EEPROM_ADDR_BASESPEED 12
-#define EEPROM_ADDR_BLACKLINE 14
-#define EEPROM_ADDR_CALIBRATED 16
-
 bool calibrationLoaded = false;
 
 void setup() {
@@ -290,9 +286,6 @@ void saveCalibration() {
     EEPROM.put(EEPROM_ADDR_KP, Kp);
     EEPROM.put(EEPROM_ADDR_KI, Ki);
     EEPROM.put(EEPROM_ADDR_KD, Kd);
-    EEPROM.put(EEPROM_ADDR_BASESPEED, baseSpeed);
-    EEPROM.put(EEPROM_ADDR_BLACKLINE, blackLineValue);
-    EEPROM.write(EEPROM_ADDR_CALIBRATED, 1);
     Serial.println("Calibration saved to EEPROM");
 }
 
@@ -301,15 +294,11 @@ void loadCalibration() {
         EEPROM.get(EEPROM_ADDR_KP, Kp);
         EEPROM.get(EEPROM_ADDR_KI, Ki);
         EEPROM.get(EEPROM_ADDR_KD, Kd);
-        EEPROM.get(EEPROM_ADDR_BASESPEED, baseSpeed);
-        EEPROM.get(EEPROM_ADDR_BLACKLINE, blackLineValue);
-        calibrationLoaded = true;
+
         Serial.println("Calibration loaded from EEPROM:");
         Serial.println("  Kp: " + String(Kp, 4));
         Serial.println("  Ki: " + String(Ki, 4));
         Serial.println("  Kd: " + String(Kd, 4));
-        Serial.println("  baseSpeed: " + String(baseSpeed));
-        Serial.println("  blackLineValue: " + String(blackLineValue));
     } else {
         Serial.println("No calibration data found in EEPROM, using defaults");
     }
@@ -319,9 +308,6 @@ void resetCalibration() {
     Kp = 10;
     Ki = 0;
     Kd = 100;
-    baseSpeed = 50;
-    blackLineValue = 4090;
-    EEPROM.write(EEPROM_ADDR_CALIBRATED, 0);
     Serial.println("Calibration reset to defaults");
 }
 
