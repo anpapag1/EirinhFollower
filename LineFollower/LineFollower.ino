@@ -1,6 +1,14 @@
 #include <QTRSensors.h>
 #include <pidautotuner.h>
-#include <EEPROM.h>
+// #include "BluetoothSerial.h"
+
+// // Ensure Bluetooth is enabled
+// #if !defined(CONFIG_BT_ENABLED) || !defined(CONFIG_BLUEDROID_ENABLED)
+// #error Bluetooth is not enabled! Please run `make menuconfig` to enable it
+// #endif
+
+// // Bluetooth serial communication
+// BluetoothSerial SerialBT;
 
 // Button and motor pin definitions
 #define LED_BUILTIN 2
@@ -19,25 +27,20 @@ uint8_t sensorPins[SensorCount] = {13, 27, 26, 25, 33, 32, 35, 34};
 int blackLineValue = 4090;
 
 // PID variables
-double Kp = 10;
+double Kp = 3.66;
 double Ki = 0;
-double Kd = 100;
-int maxSpeed = 255;
+double Kd = 35;
 int baseSpeed = 50;
 
-PIDAutotuner tuner = PIDAutotuner();
+// // Serial command buffer
+// String inputString = "";
+// bool stringComplete = false;
 
 // Robot state variables
 uint16_t position;
 int P, D, I, previousError, PIDvalue, error;
 int lsp, rsp;
 bool debugMode = false;
-
-// EEPROM storage addresses
-#define EEPROM_ADDR_KP 0
-#define EEPROM_ADDR_KI 4
-#define EEPROM_ADDR_KD 8
-bool calibrationLoaded = false;
 
 void setup() {
     // Initialize pins
@@ -54,14 +57,10 @@ void setup() {
     qtr.setTypeAnalog();
     qtr.setSensorPins(sensorPins, SensorCount);
 
-    tuner.setTargetInputValue(35);
-    tuner.setLoopInterval(1000); // Set loop interval to 1000 microseconds (1 ms)
-    tuner.setZNMode(PIDAutotuner::ZNModeBasicPID);
-
-    // Load calibration data from EEPROM
-    loadCalibration();
-
+    // Initialize Serial communication
+    // SerialBT.begin("lINEFollower");
     Serial.begin(500000);
+
     delay(500);
     processCommand("h"); // Display help on startup
     digitalWrite(LED_BUILTIN, LOW); // Turn off built-in LED to indicate setup is complete
@@ -73,19 +72,28 @@ void loop() {
         String command = Serial.readStringUntil('\n');
         processCommand(command);
     }
+    // if (stringComplete) {
+    //     processCommand(inputString);
+    //     inputString = "";
+    //     stringComplete = false;
+    // }
+
+    // // Read Bluetooth serial data
+    // while (SerialBT.available()) {
+    //     char inChar = (char)SerialBT.read();
+    //     if (inChar == '\n') {
+    //     stringComplete = true;
+    //     } else {
+    //     inputString += inChar;
+    //     }
+    // }
 
     // read button state and start or calibrate PID if long pressed
     if (digitalRead(BUTTON_PIN) == LOW) {
         unsigned long buttonPressTime = millis();
         while (digitalRead(BUTTON_PIN) == LOW) {}
-        if (millis() - buttonPressTime > 2000) {
-            startupSequence(3,3);
-            calibratePid();
-        }
-        else {
-            startupSequence(3,3);
-            digitalWrite(SLEEP, HIGH);
-        }
+        startupSequence(3,1);
+        digitalWrite(SLEEP, HIGH);
     }
 
     position = readLine(position, blackLineValue);
@@ -130,13 +138,8 @@ void processCommand(String command) {
         debugMode = !debugMode;
         Serial.println("Debug mode " + String(debugMode ? "enabled" : "disabled"));
         break;
-        case 'c': // Calibrate PID Values
-        calibratePid();
-        break;
-        case 'r': // Reset calibration to defaults
-        resetCalibration();
-        break;
         case 'h': // Display help
+        // SerialBT.println(String(Kp, 4) + " " + String(Ki, 4) + " " + String(Kd, 4) + " " + String(baseSpeed));
         Serial.println("Commands:");
         Serial.println("  p <value> - Set proportional gain");
         Serial.println("  i <value> - Set integral gain");
@@ -229,86 +232,6 @@ void motor_drive(int PIDvalue) {
     analogWrite(BIN2, abs(left));
     }
     if (debugMode) Serial.print("\tleft:" + String(left) + "\tright: " + String(right));
-}
-
-void calibratePid(){
-    Serial.println("Starting PID autotuning...");
-    tuner.setOutputRange(-maxSpeed/2, maxSpeed/2); // Set output range to match motor control input
-    tuner.startTuningLoop(micros());
-    digitalWrite(SLEEP, HIGH);
-    long microseconds;
-    while (!tuner.isFinished()) {
-
-        // This loop must run at the same speed as the PID control loop being tuned
-        long prevMicroseconds = microseconds;
-        microseconds = micros();
-
-        // Get input value here (temperature, encoder position, velocity, etc)
-        double input = readLine(position, 4090);
-
-        // Call tunePID() with the input value and current time in microseconds
-        double output = tuner.tunePID(input, microseconds);
-
-        // Set the output - tunePid() will return values within the range configured
-        // by setOutputRange(). Don't change the value or the tuning results will be
-        // incorrect.
-        motor_drive(output);
-        // This loop must run at the same speed as the PID control loop being tuned
-        while (micros() - microseconds < 1) delayMicroseconds(1);
-        if (digitalRead(SLEEP) == LOW) {
-            Serial.println("Tuning stopped - robot disabled");
-            return;
-        }
-    }
-
-    // Turn the output off here.
-    digitalWrite(SLEEP, LOW);
-
-    // Blink built-in LED to indicate tuning is complete
-    for (int i = 0; i < 2; i++) {
-        digitalWrite(LED_BUILTIN, HIGH);
-        delay(200);
-        digitalWrite(LED_BUILTIN, LOW);
-        delay(200);
-    }
-
-    // Get PID gains - set your PID controller's gains to these
-    double kp = tuner.getKp();
-    double ki = tuner.getKi();
-    double kd = tuner.getKd();
-    Serial.println("Tuning complete! Kp: " + String(kp, 4) + " Ki: " + String(ki, 4) + " Kd: " + String(kd, 4));
-
-    // Save calibration data to EEPROM
-    saveCalibration();
-}
-
-void saveCalibration() {
-    EEPROM.put(EEPROM_ADDR_KP, Kp);
-    EEPROM.put(EEPROM_ADDR_KI, Ki);
-    EEPROM.put(EEPROM_ADDR_KD, Kd);
-    Serial.println("Calibration saved to EEPROM");
-}
-
-void loadCalibration() {
-    if (EEPROM.read(EEPROM_ADDR_CALIBRATED) == 1) {
-        EEPROM.get(EEPROM_ADDR_KP, Kp);
-        EEPROM.get(EEPROM_ADDR_KI, Ki);
-        EEPROM.get(EEPROM_ADDR_KD, Kd);
-
-        Serial.println("Calibration loaded from EEPROM:");
-        Serial.println("  Kp: " + String(Kp, 4));
-        Serial.println("  Ki: " + String(Ki, 4));
-        Serial.println("  Kd: " + String(Kd, 4));
-    } else {
-        Serial.println("No calibration data found in EEPROM, using defaults");
-    }
-}
-
-void resetCalibration() {
-    Kp = 10;
-    Ki = 0;
-    Kd = 100;
-    Serial.println("Calibration reset to defaults");
 }
 
 void startupSequence(int blinks,int sec) {
